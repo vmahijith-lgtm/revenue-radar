@@ -352,10 +352,9 @@ def render_upload_form(key_prefix: str):
         st.dataframe(df_raw.head(5), use_container_width=True)
 
     st.markdown("**💰 Channel Spend** *(used for ROI calculation)*")
-    st.caption("Pre-filled from your data's cost column. Adjust if needed.")
-    existing_spend = fetch_current_spend(ts)
+    st.caption("Pre-filled from the cost column of your uploaded data. Adjust if needed.")
 
-    # Compute per-channel cost sum from the uploaded CSV (logically: actual ad spend)
+    # ALWAYS derive from uploaded CSV — never carry over values from a previous run
     cost_by_channel = (
         df_raw.groupby("channel")["cost"].sum().to_dict()
         if "cost" in df_raw.columns else {}
@@ -363,8 +362,8 @@ def render_upload_form(key_prefix: str):
 
     spend_map = {}
     for ch in channels:
-        # Priority: previously saved → actual data cost → 0
-        default_val = existing_spend.get(ch, cost_by_channel.get(ch, 0))
+        # Default = SUM(cost) from this file. 0 if channel has no cost column.
+        default_val = cost_by_channel.get(ch, 0)
         safe_key = f"{key_prefix}_spend_{ch.replace(' ','_').replace('/','_')}"
         spend_map[ch] = st.number_input(
             ch, min_value=0,
@@ -384,13 +383,8 @@ def render_upload_form(key_prefix: str):
                 return
 
             st.write("💰 Saving channel spend…")
-            # Auto-sync actual costs from raw_clicks, then override with user values
-            from utils import sync_spend_from_raw_clicks
-            auto_costs = sync_spend_from_raw_clicks()
-            # User-entered spend takes priority over auto-computed cost
-            merged_spend = {**auto_costs, **spend_map}
-            write_channel_spend_csv(channels, spend_map=merged_spend)
-
+            # Write exactly what the user set for this dataset — no merging with old values
+            write_channel_spend_csv(channels, spend_map=spend_map)
 
             st.write("⚙️ Running dbt attribution models…")
             ok_dbt, log = run_dbt_pipeline()
