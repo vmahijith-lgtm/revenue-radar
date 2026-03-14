@@ -170,30 +170,19 @@ def generate_messy_data(num_records=100000, budget_weights=None, enable_glitches
 if __name__ == "__main__":
     print("🌪️ Generating Clean Data for Attribution + RL...")
 
-    # Generate clean data (no time glitches)
     df = generate_messy_data(num_records=100000, enable_glitches=False)
 
-    # ── Save as CSV (so user can upload via dashboard) ────────
+    # Save as CSV — upload this via the dashboard to run attribution
     csv_path = Path(__file__).resolve().parent / "generated_clicks.csv"
     df.to_csv(csv_path, index=False)
+
     print(f"✅ Saved {len(df):,} rows  →  {csv_path.name}")
-
-    # ── Also write to DuckDB if it already exists ─────────────
-    db_path = Path(__file__).resolve().parent / "attribution_project" / "dev.duckdb"
-    if db_path.exists():
-        con = duckdb.connect(str(db_path))
-        con.execute("CREATE OR REPLACE TABLE raw_clicks AS SELECT * FROM df")
-        con.close()
-        print("✅ Also loaded into raw_clicks in dev.duckdb")
-
-    # ── Summary ───────────────────────────────────────────────
     print("\n📊 Data Summary:")
     print(f"  Total touches: {len(df):,}")
     print(f"  Unique users:  {df['user_id'].nunique():,}")
     print(f"  Conversions:   {df['conversion'].sum():,}")
     print(f"  Total revenue: ${df['conversion_value'].sum():,.2f}")
     print(f"  Total cost:    ${df['cost'].sum():,.2f}")
-    cost = df['cost'].sum()
-    rev  = df['conversion_value'].sum()
+    cost, rev = df['cost'].sum(), df['conversion_value'].sum()
     print(f"  ROI:           {((rev - cost) / cost * 100):.1f}%")
     print(f"\n👉 Upload '{csv_path.name}' via the dashboard sidebar to run attribution.")
