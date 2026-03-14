@@ -1,104 +1,109 @@
 # 🛡️ Attribution Engine
 
-A production-ready, **multi-touch marketing attribution** pipeline built on **DuckDB + dbt + Streamlit**.
+> Multi-touch marketing attribution pipeline built on **DuckDB + dbt + Streamlit**.
 
-It generates synthetic clickstream data, applies five attribution models (First Touch, Last Touch, U-Shaped, Time Decay, Markov Chain), computes per-channel ROI, and visualises results in an interactive dashboard.
-
----
-
-## 📐 Architecture
-
-```
-sample1.py          →   DuckDB (raw_clicks)
-                              ↓
-                    dbt seed (channel_spend)
-                              ↓
-              dbt models (heuristic → markov → final → ROI)
-                              ↓
-                    dashboard.py (Streamlit UI)
-```
+Generates or accepts your own clickstream data, applies five attribution models, computes per-channel ROI, and visualises results in an interactive dashboard.
 
 ---
 
-## 🚀 Quickstart
+## Architecture
 
-### 1. Create & activate a virtual environment
-```bash
-python -m venv venv
-source venv/bin/activate          # Windows: venv\Scripts\activate
+```
+sample1.py  (or upload via dashboard)
+      ↓
+  DuckDB  raw_clicks
+      ↓
+  dbt seed  (channel_spend.csv)
+      ↓
+  dbt models → heuristic · markov · final · roi
+      ↓
+  dashboard.py  (Streamlit)
 ```
 
-### 2. Install dependencies
+---
+
+## Quickstart
+
 ```bash
+# 1. Create virtualenv & install
+python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-```
 
-### 3. Run the full pipeline (one command)
-```bash
+# 2. Run full pipeline
 python run_pipeline.py
-```
-This will:
-- Generate ~100 k synthetic click events → `attribution_project/dev.duckdb`
-- Seed channel spend data (`seeds/channel_spend.csv`)
-- Run all four dbt models
 
-### 4. Launch the dashboard
-```bash
+# 3. Launch dashboard
 streamlit run dashboard.py
 ```
-Open [http://localhost:8501](http://localhost:8501) in your browser.
 
 ---
 
-## 📂 Project Structure
+## Attribution Models
+
+| Model | Description |
+|---|---|
+| **First Touch** | 100% credit to first channel |
+| **Last Touch** | 100% credit to final channel |
+| **U-Shaped** | 40/40/20 — first, last, middle |
+| **Time Decay** | Exponential credit toward conversion |
+| **Markov Chain** | Data-driven removal effect |
+| **ROI Comparison** | (Revenue − Spend) / Spend × 100 per model |
+
+---
+
+## Project Structure
 
 ```
 attribution_engine/
-├── dashboard.py              # Streamlit dashboard
-├── run_pipeline.py           # Full pipeline orchestrator
+├── dashboard.py              # Streamlit app
+├── run_pipeline.py           # Pipeline orchestrator
 ├── sample1.py                # Synthetic data generator
-├── see.py                    # Quick DB inspection script
 ├── requirements.txt
-├── profiles/
-│   └── profiles.yml          # dbt DuckDB connection profile
+├── .streamlit/config.toml    # Theme & server config
+├── profiles/profiles.yml     # dbt DuckDB connection
 └── attribution_project/      # dbt project
     ├── dbt_project.yml
-    ├── seeds/
-    │   └── channel_spend.csv # Channel marketing spend
-    ├── models/
-    │   ├── sources.yml
-    │   ├── heuristic_attribution.sql   # First/Last/U-Shaped/Time-Decay
-    │   ├── markov_attribution.py       # Markov Chain (dbt Python model)
-    │   ├── final_attribution.sql       # Combined comparison table
-    │   └── roi_attribution.sql         # ROI% per channel per model
-    └── tests/
+    ├── seeds/channel_spend.csv
+    └── models/
+        ├── sources.yml
+        ├── heuristic_attribution.sql
+        ├── markov_attribution.py
+        ├── final_attribution.sql
+        └── roi_attribution.sql
 ```
 
 ---
 
-## 📊 Attribution Models
+## Deploying to Streamlit Community Cloud
 
-| Model | Description |
-|-------|-------------|
-| **First Touch** | 100% credit to the first channel a user touched |
-| **Last Touch** | 100% credit to the final channel before conversion |
-| **U-Shaped** | 40% first, 40% last, 20% distributed across middle touches |
-| **Time Decay** | Exponentially more credit to touches closer to conversion |
-| **Markov Chain** | Data-driven removal effect — credit ∝ how much conversions drop when a channel is removed |
-| **ROI Comparison** | Cross-model ROI% = (Attributed Revenue − Spend) / Spend × 100 |
+1. Push this repo to GitHub (make sure `*.duckdb` is in `.gitignore`)
+2. Go to [share.streamlit.io](https://share.streamlit.io) → **New app**
+3. Set **Main file path**: `dashboard.py`
+4. Add a **Secrets** entry if needed (none required for default config)
+5. Click **Deploy**
+
+> **Note**: The app will show a friendly "no data yet" screen until the pipeline is run. For cloud deployments, upload your CSV directly through the sidebar uploader.
 
 ---
 
-## ⚙️ Configuration
+## dbt Commands
 
-### dbt Profile
-The project uses a local `profiles/profiles.yml` (already included). You can override the DuckDB path via:
 ```bash
-export DBT_DUCKDB_PATH=/path/to/your.duckdb
+cd attribution_project
+
+dbt debug  --profiles-dir ../profiles   # Test connection
+dbt seed   --profiles-dir ../profiles   # Load channel spend
+dbt run    --profiles-dir ../profiles   # Run all models
+dbt test   --profiles-dir ../profiles   # Run schema tests
 ```
 
-### U-Shaped weights
-Edit `attribution_project/dbt_project.yml` → `vars.u_shape` to adjust the 40/40/20 split:
+---
+
+## Configuration
+
+**U-Shaped weights** — adjust in the dashboard sidebar (no restart needed).
+
+**dbt vars** — edit `attribution_project/dbt_project.yml`:
 ```yaml
 vars:
   u_shape:
@@ -107,28 +112,13 @@ vars:
     middle: 0.2
 ```
 
----
-
-## 🧪 Running dbt commands manually
-
+**DuckDB path override**:
 ```bash
-cd attribution_project
-
-# Check connection
-dbt debug --profiles-dir ../profiles
-
-# Load seed data only
-dbt seed --profiles-dir ../profiles
-
-# Run all models
-dbt run --profiles-dir ../profiles
-
-# Run tests
-dbt test --profiles-dir ../profiles
+export DBT_DUCKDB_PATH=/path/to/custom.duckdb
 ```
 
 ---
 
-## 📝 License
+## License
 
 MIT

@@ -2,121 +2,173 @@ import streamlit as st
 import duckdb
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import subprocess
 import io
 from pathlib import Path
 
-st.set_page_config(page_title="Attribution Engine", layout="wide", page_icon="🛡️")
+# ─────────────────────────────────────────────────────────────
+# Page config (must be first)
+# ─────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="Attribution Engine",
+    page_icon="🛡️",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-# --- PATHS ---
+# ─────────────────────────────────────────────────────────────
+# Paths
+# ─────────────────────────────────────────────────────────────
 PROJECT_ROOT    = Path(__file__).resolve().parent
 DB_PATH         = PROJECT_ROOT / "attribution_project" / "dev.duckdb"
 DBT_PROJECT_DIR = PROJECT_ROOT / "attribution_project"
 PROFILES_DIR    = PROJECT_ROOT / "profiles"
 
 # ─────────────────────────────────────────────────────────────
-# Expected schema for uploaded CSVs
+# Schema
 # ─────────────────────────────────────────────────────────────
-REQUIRED_COLS = {
-    "event_id", "user_id", "timestamp", "channel",
-    "conversion", "conversion_value",
-}
+REQUIRED_COLS = {"event_id", "user_id", "timestamp", "channel", "conversion", "conversion_value"}
 OPTIONAL_COLS = {"cost", "user_engagement", "touch_number"}
-ALL_COLS = REQUIRED_COLS | OPTIONAL_COLS
 
+SAMPLE_CSV = (
+    "event_id,user_id,timestamp,channel,conversion,conversion_value,cost,user_engagement,touch_number\n"
+    "evt-001,user-A,2024-01-01 10:00:00,Paid Search,0,0.0,2.5,0.8,1\n"
+    "evt-002,user-A,2024-01-02 11:00:00,Email,0,0.0,0.3,0.8,2\n"
+    "evt-003,user-A,2024-01-03 12:00:00,Direct,1,150.0,0.0,0.8,3\n"
+    "evt-004,user-B,2024-01-01 09:00:00,Social Media,0,0.0,1.8,0.6,1\n"
+    "evt-005,user-B,2024-01-02 14:00:00,Organic Search,1,95.0,0.5,0.6,2\n"
+)
+
+MODEL_LABELS = {
+    "val_first_touch": "First Touch",
+    "val_last_touch":  "Last Touch",
+    "val_u_shaped":    "U-Shaped",
+    "val_time_decay":  "Time Decay",
+    "val_markov":      "Markov",
+    "roi_first_touch": "First Touch",
+    "roi_last_touch":  "Last Touch",
+    "roi_u_shaped":    "U-Shaped",
+    "roi_time_decay":  "Time Decay",
+    "roi_markov":      "Markov",
+}
 
 # ─────────────────────────────────────────────────────────────
-# Sample template for download
+# DB connection (read-only, cached for the session)
 # ─────────────────────────────────────────────────────────────
-SAMPLE_CSV = """event_id,user_id,timestamp,channel,conversion,conversion_value,cost,user_engagement,touch_number
-evt-001,user-A,2024-01-01 10:00:00,Paid Search,0,0.0,2.5,0.8,1
-evt-002,user-A,2024-01-02 11:00:00,Email,0,0.0,0.3,0.8,2
-evt-003,user-A,2024-01-03 12:00:00,Direct,1,150.0,0.0,0.8,3
-evt-004,user-B,2024-01-01 09:00:00,Social Media,0,0.0,1.8,0.6,1
-evt-005,user-B,2024-01-02 14:00:00,Organic Search,1,95.0,0.5,0.6,2
-"""
-
-
-# ─────────────────────────────────────────────────────────────
-# DB helpers
-# ─────────────────────────────────────────────────────────────
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def get_con():
+    if not DB_PATH.exists():
+        return None
     try:
         return duckdb.connect(str(DB_PATH), read_only=True)
-    except Exception as e:
-        st.error(f"Database connection failed: {e}")
+    except Exception:
         return None
 
 
-def get_available_models(con):
-    models = {
-        "First Touch":      {"available": False, "table": "heuristic_attribution", "col": "val_first_touch"},
-        "Last Touch":       {"available": False, "table": "heuristic_attribution", "col": "val_last_touch"},
-        "U-Shaped":         {"available": False, "table": "heuristic_attribution", "col": "val_u_shaped"},
-        "Time Decay":       {"available": False, "table": "heuristic_attribution", "col": "val_time_decay"},
-        "Markov Chain":     {"available": False, "table": "markov_attribution",    "col": "attributed_value"},
-        "Model Comparison": {"available": False, "table": "final_attribution",     "col": None},
-        "ROI Comparison":   {"available": False, "table": "roi_attribution",       "col": None},
-    }
+# ─────────────────────────────────────────────────────────────
+# Cached data fetchers (TTL = 5 min)
+# ─────────────────────────────────────────────────────────────
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_kpis(_ts):
+    con = get_con()
+    if con is None:
+        return None
+    try:
+        return con.sql("""
+            SELECT
+                COUNT(DISTINCT user_id)   AS users,
+                SUM(conversion)           AS conversions,
+                SUM(conversion_value)     AS revenue,
+                SUM(cost)                 AS spend
+            FROM raw_clicks
+        """).df().iloc[0]
+    except Exception:
+        return None
 
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_model_data(_ts, model_name):
+    con = get_con()
+    if con is None:
+        return None, None
+    try:
+        if model_name == "Model Comparison":
+            df = con.sql("SELECT channel,val_first_touch,val_last_touch,val_u_shaped,val_time_decay,val_markov FROM final_attribution").df()
+            plot_df = df.melt("channel", var_name="model", value_name="revenue")
+            plot_df["model"] = plot_df["model"].map(MODEL_LABELS)
+        elif model_name == "ROI Comparison":
+            df = con.sql("SELECT channel,roi_first_touch,roi_last_touch,roi_u_shaped,roi_time_decay,roi_markov FROM roi_attribution").df()
+            plot_df = df.melt("channel", var_name="model", value_name="roi_pct")
+            plot_df["model"] = plot_df["model"].map(MODEL_LABELS)
+        else:
+            cfg = MODELS[model_name]
+            df = con.sql(f"SELECT channel, {cfg['col']} AS value FROM {cfg['table']} ORDER BY 2 DESC").df()
+            plot_df = df.assign(model=model_name)
+        return df, plot_df
+    except Exception:
+        return None, None
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def get_available_models_cached(_ts):
+    con = get_con()
+    if con is None:
+        return []
+    available = []
     checks = {
         "heuristic_attribution": ["First Touch", "Last Touch", "U-Shaped", "Time Decay"],
         "final_attribution":     ["Model Comparison"],
         "roi_attribution":       ["ROI Comparison"],
     }
-
     for table, names in checks.items():
         try:
             con.sql(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
-            for n in names:
-                models[n]["available"] = True
+            available.extend(names)
         except Exception:
             pass
-
     try:
-        row = con.sql("SELECT status, error_msg FROM markov_attribution LIMIT 1").fetchone()
+        row = con.sql("SELECT status FROM markov_attribution LIMIT 1").fetchone()
         if row and row[0] == "success":
-            models["Markov Chain"]["available"] = True
-        else:
-            st.session_state["markov_error"] = row[1] if row else "Unknown Error"
+            available.insert(4, "Markov Chain")
     except Exception:
         pass
+    return available
 
-    return models
 
+# ─────────────────────────────────────────────────────────────
+# Model registry
+# ─────────────────────────────────────────────────────────────
+MODELS = {
+    "First Touch":      {"table": "heuristic_attribution", "col": "val_first_touch"},
+    "Last Touch":       {"table": "heuristic_attribution", "col": "val_last_touch"},
+    "U-Shaped":         {"table": "heuristic_attribution", "col": "val_u_shaped"},
+    "Time Decay":       {"table": "heuristic_attribution", "col": "val_time_decay"},
+    "Markov Chain":     {"table": "markov_attribution",    "col": "attributed_value"},
+    "Model Comparison": {"table": "final_attribution",     "col": None},
+    "ROI Comparison":   {"table": "roi_attribution",       "col": None},
+}
 
 # ─────────────────────────────────────────────────────────────
 # Upload helpers
 # ─────────────────────────────────────────────────────────────
 def validate_csv(df: pd.DataFrame):
-    """Return (ok: bool, message: str)."""
     missing = REQUIRED_COLS - set(df.columns)
     if missing:
-        return False, f"Missing required columns: {', '.join(sorted(missing))}"
+        return False, f"Missing columns: **{', '.join(sorted(missing))}**"
     if len(df) == 0:
-        return False, "Uploaded file contains no data rows."
-    # Check channel values
+        return False, "File contains no data rows."
     return True, "OK"
 
 
-def ingest_to_duckdb(df: pd.DataFrame):
-    """Write uploaded DataFrame to DuckDB as raw_clicks (write mode)."""
-    # Fill optional columns with defaults if absent
+def ingest_to_duckdb(df: pd.DataFrame) -> int:
     df = df.copy()
-    if "cost" not in df.columns:
-        df["cost"] = 0.0
-    if "user_engagement" not in df.columns:
-        df["user_engagement"] = 1.0
-    if "touch_number" not in df.columns:
-        # Compute from timestamp order per user
-        df["touch_number"] = (
-            df.sort_values(["user_id", "timestamp"])
-              .groupby("user_id")
-              .cumcount() + 1
-        )
+    if "cost"             not in df.columns: df["cost"]             = 0.0
+    if "user_engagement"  not in df.columns: df["user_engagement"]  = 1.0
+    if "touch_number"     not in df.columns:
+        df = df.sort_values(["user_id", "timestamp"])
+        df["touch_number"] = df.groupby("user_id").cumcount() + 1
 
-    # Ensure correct dtypes
     df["conversion"]       = df["conversion"].astype(int)
     df["conversion_value"] = df["conversion_value"].astype(float)
     df["cost"]             = df["cost"].astype(float)
@@ -124,199 +176,213 @@ def ingest_to_duckdb(df: pd.DataFrame):
     df["touch_number"]     = df["touch_number"].astype(int)
     df["timestamp"]        = pd.to_datetime(df["timestamp"])
 
-    con = duckdb.connect(str(DB_PATH))  # write mode
+    con = duckdb.connect(str(DB_PATH))
     con.execute("CREATE OR REPLACE TABLE raw_clicks AS SELECT * FROM df")
-    row_count = con.execute("SELECT COUNT(*) FROM raw_clicks").fetchone()[0]
+    n = con.execute("SELECT COUNT(*) FROM raw_clicks").fetchone()[0]
     con.close()
-    return row_count
+    return n
 
 
 def run_dbt_pipeline():
-    """Run dbt seed + dbt run and return (success, log)."""
-    full_log = []
-    for cmd in [
+    cmds = [
         f'dbt seed --profiles-dir "{PROFILES_DIR}"',
         f'dbt run  --profiles-dir "{PROFILES_DIR}"',
-    ]:
-        result = subprocess.run(
-            cmd, shell=True, cwd=DBT_PROJECT_DIR,
-            capture_output=True, text=True,
-        )
-        full_log.append(f"$ {cmd}\n{result.stdout}{result.stderr}")
-        if result.returncode != 0:
-            return False, "\n".join(full_log)
-    return True, "\n".join(full_log)
+    ]
+    log_parts = []
+    for cmd in cmds:
+        r = subprocess.run(cmd, shell=True, cwd=DBT_PROJECT_DIR, capture_output=True, text=True)
+        log_parts.append(f"$ {cmd}\n{r.stdout}{r.stderr}")
+        if r.returncode != 0:
+            return False, "\n".join(log_parts)
+    return True, "\n".join(log_parts)
 
 
 # ─────────────────────────────────────────────────────────────
-# SIDEBAR – Upload Section
+# Cache timestamp (bust caches after upload)
+# ─────────────────────────────────────────────────────────────
+if "cache_ts" not in st.session_state:
+    st.session_state["cache_ts"] = 0
+
+ts = st.session_state["cache_ts"]
+
+# ─────────────────────────────────────────────────────────────
+# SIDEBAR
 # ─────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.title("⚙️ Data Controls")
+    st.markdown("## 🛡️ Attribution Engine")
+    st.markdown("---")
+
+    # ── Upload section ───────────────────────────────────────
+    st.markdown("### 📥 Upload Click Data")
+    st.caption("Upload a CSV of your own clickstream data to override the synthetic dataset.")
 
     st.download_button(
-        label="📄 Download sample CSV template",
-        data=SAMPLE_CSV,
+        "📄 Download sample template",
+        SAMPLE_CSV,
         file_name="sample_clicks.csv",
         mime="text/csv",
         use_container_width=True,
     )
 
-    st.markdown("---")
-    st.subheader("📥 Upload Your Click Data")
-    st.caption(
-        "Upload a CSV with your own clickstream data. "
-        "Required columns: `event_id`, `user_id`, `timestamp`, `channel`, "
-        "`conversion`, `conversion_value`."
-    )
-
     uploaded_file = st.file_uploader(
-        "Choose a CSV file", type=["csv"], label_visibility="collapsed"
+        "Upload CSV", type=["csv"], label_visibility="collapsed"
     )
 
-    if uploaded_file is not None:
+    if uploaded_file:
         try:
             df_upload = pd.read_csv(uploaded_file)
         except Exception as e:
-            st.error(f"Could not read file: {e}")
+            st.error(f"Cannot read file: {e}")
             df_upload = None
 
         if df_upload is not None:
             ok, msg = validate_csv(df_upload)
             if not ok:
-                st.error(f"❌ Validation failed: {msg}")
+                st.error(f"❌ {msg}")
             else:
-                st.success(f"✅ {len(df_upload):,} rows detected — looks good!")
-
-                # Preview
-                with st.expander("Preview (first 5 rows)"):
+                st.success(f"✅ {len(df_upload):,} rows — ready to ingest")
+                with st.expander("Preview"):
                     st.dataframe(df_upload.head(5), use_container_width=True)
 
-                if st.button("🚀 Ingest & Run Attribution", use_container_width=True, type="primary"):
-                    with st.status("Processing your data…", expanded=True) as status:
-                        # Step 1: Write to DuckDB
-                        st.write("📝 Writing data to DuckDB…")
+                if st.button("🚀 Run Attribution", type="primary", use_container_width=True):
+                    with st.status("Running pipeline…", expanded=True) as status:
+                        st.write("📝 Writing to DuckDB…")
                         try:
-                            row_count = ingest_to_duckdb(df_upload)
-                            st.write(f"   ✔ {row_count:,} rows loaded into `raw_clicks`")
+                            n = ingest_to_duckdb(df_upload)
+                            st.write(f"   ✔ {n:,} rows loaded")
                         except Exception as e:
-                            st.error(f"DuckDB write failed: {e}")
-                            status.update(label="Failed", state="error")
+                            status.update(label="Failed at ingestion", state="error")
+                            st.error(str(e))
                             st.stop()
 
-                        # Step 2: Run dbt
                         st.write("⚙️ Running dbt models…")
-                        success, dbt_log = run_dbt_pipeline()
+                        ok, log = run_dbt_pipeline()
 
-                        if success:
-                            status.update(label="✅ Pipeline complete!", state="complete")
-                            # Bust the cached connection so dashboard refreshes
+                        if ok:
+                            status.update(label="✅ Done!", state="complete")
+                            # Bust all caches
+                            st.cache_data.clear()
                             st.cache_resource.clear()
+                            st.session_state["cache_ts"] += 1
                             st.rerun()
                         else:
                             status.update(label="dbt failed", state="error")
-                            with st.expander("dbt error log"):
-                                st.code(dbt_log)
+                            with st.expander("Error log"):
+                                st.code(log, language="bash")
 
     st.markdown("---")
-    st.caption("💡 Or regenerate synthetic data by running `python run_pipeline.py` in the terminal.")
+    st.markdown("### ⚙️ Settings")
 
+    # U-shape weight sliders
+    with st.expander("U-Shaped weights"):
+        first_w  = st.slider("First touch %", 0, 100, 40, step=5)
+        last_w   = st.slider("Last touch %",  0, 100, 40, step=5)
+        middle_w = 100 - first_w - last_w
+        if middle_w < 0:
+            st.error("Weights exceed 100%. Adjust sliders.")
+        else:
+            st.caption(f"Middle touches: **{middle_w}%**")
+
+    st.markdown("---")
+    st.caption("💡 Run `python run_pipeline.py` to regenerate synthetic data.")
 
 # ─────────────────────────────────────────────────────────────
-# MAIN – Attribution Dashboard
+# MAIN – guard: no DB yet
 # ─────────────────────────────────────────────────────────────
+if not DB_PATH.exists():
+    st.title("🛡️ Attribution Engine")
+    st.info("👈 **No data yet.** Upload a CSV in the sidebar, or run `python run_pipeline.py` to generate synthetic data.")
+    st.stop()
+
 con = get_con()
-
 if con is None:
+    st.error("Cannot connect to the database. Run `python run_pipeline.py` first.")
     st.stop()
 
-st.title("🛡️ Anti-Fragile Attribution Dashboard")
+# ─────────────────────────────────────────────────────────────
+# KPI row
+# ─────────────────────────────────────────────────────────────
+st.markdown("## 🛡️ Attribution Dashboard")
 
-model_config  = get_available_models(con)
-valid_options = [name for name, cfg in model_config.items() if cfg["available"]]
+kpis = fetch_kpis(ts)
+if kpis is not None:
+    c1, c2, c3, c4, c5 = st.columns(5)
+    spend   = float(kpis["spend"])
+    revenue = float(kpis["revenue"])
+    roi     = ((revenue - spend) / spend * 100) if spend > 0 else 0
+    c1.metric("👤 Users",       f"{int(kpis['users']):,}")
+    c2.metric("✅ Conversions", f"{int(kpis['conversions']):,}")
+    c3.metric("💰 Revenue",     f"${revenue:,.0f}")
+    c4.metric("📢 Spend",       f"${spend:,.0f}")
+    c5.metric("📈 Blended ROI", f"{roi:.1f}%")
+    st.markdown("---")
 
-if not valid_options:
-    st.error("🚨 No attribution models found. Run the pipeline or upload data first.")
+# ─────────────────────────────────────────────────────────────
+# Model selector
+# ─────────────────────────────────────────────────────────────
+valid_models = get_available_models_cached(ts)
+
+if not valid_models:
+    st.warning("No attribution models found. Run the pipeline first.")
     st.stop()
 
-if "Markov Chain" not in valid_options:
-    st.warning(
-        f"⚠️ Markov Chain model is offline. "
-        f"(Error: {st.session_state.get('markov_error', 'Not built')})"
-    )
+col_sel, col_info = st.columns([3, 1])
+with col_sel:
+    selected = st.selectbox("Attribution Model", valid_models, label_visibility="collapsed")
+with col_info:
+    MODEL_DESC = {
+        "First Touch":      "100% credit to the first channel.",
+        "Last Touch":       "100% credit to the last channel.",
+        "U-Shaped":         "40/40/20 split: first, last, middle.",
+        "Time Decay":       "Exponential credit toward conversion.",
+        "Markov Chain":     "Data-driven removal-effect attribution.",
+        "Model Comparison": "Side-by-side revenue across all models.",
+        "ROI Comparison":   "ROI% per channel per model.",
+    }
+    st.caption(MODEL_DESC.get(selected, ""))
 
-selected_model_name = st.selectbox("Select Attribution Model", valid_options)
+# ─────────────────────────────────────────────────────────────
+# Fetch & render
+# ─────────────────────────────────────────────────────────────
+with st.spinner("Loading…"):
+    df, plot_df = fetch_model_data(ts, selected)
 
-cfg = model_config[selected_model_name]
+if df is None:
+    st.error(f"Could not load data for **{selected}**. Run the pipeline first.")
+    st.stop()
 
-# ── Fetch data ──────────────────────────────────────────────
-if selected_model_name == "Model Comparison":
-    df = con.sql("""
-        SELECT channel, val_first_touch, val_last_touch,
-               val_u_shaped, val_time_decay, val_markov
-        FROM final_attribution
-    """).df()
-    plot_df = df.melt(
-        id_vars="channel",
-        value_vars=["val_first_touch","val_last_touch","val_u_shaped","val_time_decay","val_markov"],
-        var_name="model", value_name="revenue",
-    )
+chart_col, table_col = st.columns([3, 2])
 
-elif selected_model_name == "ROI Comparison":
-    df = con.sql("""
-        SELECT channel, roi_first_touch, roi_last_touch,
-               roi_u_shaped, roi_time_decay, roi_markov
-        FROM roi_attribution
-    """).df()
-    plot_df = df.melt(
-        id_vars="channel",
-        value_vars=["roi_first_touch","roi_last_touch","roi_u_shaped","roi_time_decay","roi_markov"],
-        var_name="model", value_name="roi_pct",
-    )
-
-else:
-    df = con.sql(f"""
-        SELECT channel, {cfg['col']} AS revenue
-        FROM {cfg['table']}
-        ORDER BY 2 DESC
-    """).df()
-    plot_df = df.copy()
-    plot_df["model"] = selected_model_name
-
-# ── Quick stats ─────────────────────────────────────────────
-try:
-    stats = con.sql("""
-        SELECT
-            COUNT(DISTINCT user_id)      AS users,
-            SUM(conversion)              AS conversions,
-            SUM(conversion_value)        AS revenue,
-            SUM(cost)                    AS spend
-        FROM raw_clicks
-    """).df().iloc[0]
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("👤 Unique Users",    f"{int(stats.users):,}")
-    c2.metric("✅ Conversions",     f"{int(stats.conversions):,}")
-    c3.metric("💰 Total Revenue",   f"${stats.revenue:,.0f}")
-    c4.metric("📊 Total Spend",     f"${stats.spend:,.0f}")
-except Exception:
-    pass
-
-st.markdown("---")
-
-# ── Chart & table ────────────────────────────────────────────
-st.subheader(f"Results: {selected_model_name}")
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    if selected_model_name == "Model Comparison":
-        fig = px.bar(plot_df, x="channel", y="revenue", color="model", barmode="group")
-    elif selected_model_name == "ROI Comparison":
-        fig = px.bar(plot_df, x="channel", y="roi_pct", color="model", barmode="group")
-        fig.update_layout(yaxis_title="ROI (%)")
+with chart_col:
+    st.subheader(selected)
+    if selected == "Model Comparison":
+        fig = px.bar(plot_df, x="channel", y="revenue",  color="model", barmode="group",
+                     labels={"revenue": "Attributed Revenue ($)", "channel": "Channel"})
+    elif selected == "ROI Comparison":
+        fig = px.bar(plot_df, x="channel", y="roi_pct",  color="model", barmode="group",
+                     labels={"roi_pct": "ROI (%)", "channel": "Channel"})
+        fig.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.4)
     else:
-        fig = px.bar(plot_df, x="channel", y="revenue", color="channel")
+        fig = px.bar(plot_df, x="channel", y="value", color="channel",
+                     labels={"value": "Attributed Revenue ($)", "channel": "Channel"})
+
+    fig.update_layout(
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        legend_title_text="Model",
+        margin=dict(l=0, r=0, t=30, b=0),
+    )
     st.plotly_chart(fig, use_container_width=True)
 
-with col2:
-    st.dataframe(df, use_container_width=True)
+with table_col:
+    st.subheader("Data Table")
+    st.dataframe(df, use_container_width=True, height=380)
+
+    csv_bytes = df.to_csv(index=False).encode()
+    st.download_button(
+        "⬇️ Export table as CSV",
+        csv_bytes,
+        file_name=f"{selected.replace(' ','_').lower()}.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
