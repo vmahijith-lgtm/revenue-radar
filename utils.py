@@ -54,3 +54,29 @@ def sync_channel_spend_from_db(db_path: Path = DB_PATH, spend_map: dict = None):
     if not channels:
         return
     write_channel_spend_csv(channels, spend_map=spend_map)
+
+
+def sync_spend_from_raw_clicks(db_path: Path = DB_PATH) -> dict:
+    """
+    Read actual SUM(cost) per channel from raw_clicks and write channel_spend.csv.
+    This is the canonical spend figure — the sum of all ad costs in the data.
+
+    Returns the spend_map written.
+    """
+    try:
+        con = duckdb.connect(str(db_path), read_only=True)
+        rows = con.execute("""
+            SELECT channel, ROUND(SUM(cost), 2) AS total_cost
+            FROM raw_clicks
+            WHERE channel IS NOT NULL
+            GROUP BY channel
+        """).fetchall()
+        con.close()
+        spend_map = {r[0]: float(r[1]) for r in rows}
+    except Exception:
+        spend_map = {}
+
+    channels = list(spend_map.keys()) or []
+    if channels:
+        write_channel_spend_csv(sorted(channels), spend_map=spend_map)
+    return spend_map

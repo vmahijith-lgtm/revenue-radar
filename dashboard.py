@@ -371,7 +371,13 @@ def render_upload_form(key_prefix: str):
                 return
 
             st.write("💰 Saving channel spend…")
-            write_channel_spend_csv(channels, spend_map=spend_map)
+            # Auto-sync actual costs from raw_clicks, then override with user values
+            from utils import sync_spend_from_raw_clicks
+            auto_costs = sync_spend_from_raw_clicks()
+            # User-entered spend takes priority over auto-computed cost
+            merged_spend = {**auto_costs, **spend_map}
+            write_channel_spend_csv(channels, spend_map=merged_spend)
+
 
             st.write("⚙️ Running dbt attribution models…")
             ok_dbt, log = run_dbt_pipeline()
