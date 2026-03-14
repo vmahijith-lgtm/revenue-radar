@@ -24,7 +24,7 @@ cost AS (
 
 SELECT
     rev.channel,
-    cost.spend,
+    COALESCE(cost.spend, 0) AS spend,
 
     -- Attributed revenue by model
     rev.val_first_touch,
