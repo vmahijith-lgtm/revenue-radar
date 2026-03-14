@@ -1,0 +1,26 @@
+name: "attribution_project"
+version: "1.0.0"
+config-version: 2
+
+profile: "attribution_project"
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  attribution_project:
+    +materialized: view
+
+# 👇 vars MUST be at the TOP LEVEL, not under "models:"
+vars:
+  u_shape:
+    first: 0.4
+    last: 0.4
+    middle: 0.2
