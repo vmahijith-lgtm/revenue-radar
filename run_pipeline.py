@@ -1,7 +1,15 @@
-import os
+"""
+run_pipeline.py – dbt orchestrator
+
+Runs dbt seed + dbt run against the DuckDB database.
+Data must already be loaded into raw_clicks before running this.
+
+To load data:
+  - Upload a CSV through the dashboard (recommended), OR
+  - Run `python sample1.py` to generate synthetic data first
+"""
 import subprocess
 from pathlib import Path
-from utils import sync_channel_spend_from_db
 
 PROJECT_ROOT    = Path(__file__).resolve().parent
 DBT_PROJECT_DIR = PROJECT_ROOT / "attribution_project"
@@ -16,27 +24,19 @@ def run_cmd(cmd, cwd=None):
 
 
 def main():
-    # 1. Generate synthetic click data → DuckDB
-    run_cmd("python sample1.py", cwd=PROJECT_ROOT)
-
-    # 2. Auto-generate channel_spend.csv from actual channels in DB
-    print("\n🟢 Syncing channel_spend.csv from raw_clicks channels…")
-    sync_channel_spend_from_db()
-    print("   ✔ channel_spend.csv updated")
-
-    # 3. Seed channel spend table
+    # Seed channel spend reference data
     run_cmd(
         f'dbt seed --profiles-dir "{PROFILES_DIR}"',
         cwd=DBT_PROJECT_DIR,
     )
 
-    # 4. Run all dbt models
+    # Run attribution models
     run_cmd(
         f'dbt run  --profiles-dir "{PROFILES_DIR}"',
         cwd=DBT_PROJECT_DIR,
     )
 
-    print("\n✅ Pipeline complete: data generated → seeded → dbt models updated.")
+    print("\n✅ Attribution models updated.")
     print("👉 Launch the dashboard with:  streamlit run dashboard.py")
 
 

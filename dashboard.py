@@ -366,7 +366,7 @@ with st.sidebar:
                             st.code(log, language="bash")
 
     st.markdown("---")
-    st.caption("💡 Run `python run_pipeline.py` to regenerate synthetic data.")
+    st.caption("💡 To run dbt models manually: `python run_pipeline.py`  \n💡 To generate synthetic data: `python sample1.py`")
 
 
 # ─────────────────────────────────────────────────────────────
