@@ -352,7 +352,7 @@ with st.sidebar:
             use_container_width=True,
         )
 
-        uploaded_file = st.file_uploader("", type=["csv"], label_visibility="collapsed")
+        uploaded_file = st.file_uploader("Upload CSV file", type=["csv"], label_visibility="collapsed")
 
         if uploaded_file:
             try:

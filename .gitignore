@@ -26,6 +26,9 @@ attribution_project/logs/
 *.duckdb
 *.duckdb.wal
 
+# Generated data files
+generated_clicks.csv
+
 # Logs
 logs/
 *.log
