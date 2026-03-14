@@ -347,6 +347,9 @@ def render_upload_form(key_prefix: str):
 
     if st.button("🚀 Run Attribution", type="primary", use_container_width=True, key=f"{key_prefix}_run"):
         with st.status("Running pipeline…", expanded=True) as status:
+            # Release read-only connection FIRST so write operations can proceed
+            st.cache_resource.clear()
+
             st.write("📝 Loading data into DuckDB…")
             try:
                 n = ingest_to_duckdb(df_raw)
@@ -401,6 +404,8 @@ with st.sidebar:
                     )
                 if st.button("💾 Save & Rerun", use_container_width=True, type="primary"):
                     with st.spinner("Updating…"):
+                        # Release read-only connection before dbt writes
+                        st.cache_resource.clear()
                         write_channel_spend_csv(existing_channels, spend_map=updated_spend)
                         ok, log = run_dbt_pipeline()
                         if ok:
