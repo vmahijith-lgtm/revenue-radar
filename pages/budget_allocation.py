@@ -8,7 +8,9 @@ import pandas as pd
 import plotly.express as px
 import requests
 
-API_URL = "http://localhost:8000"
+import os
+API_URL = os.getenv("API_URL", "http://localhost:8000")
+
 
 # ─────────────────────────────────────────────────────────────
 # Custom CSS (green accent to distinguish from attribution purple)
