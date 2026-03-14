@@ -275,6 +275,13 @@ def ingest_to_duckdb(df: pd.DataFrame) -> int:
 
 
 def run_dbt_pipeline():
+    # Always sync spend from raw_clicks BEFORE seeding — ensures correctness for any dataset
+    try:
+        from utils import sync_spend_from_raw_clicks
+        sync_spend_from_raw_clicks()
+    except Exception:
+        pass  # non-fatal: dbt will use whatever is in channel_spend.csv
+
     cmds = [
         f'dbt seed --profiles-dir "{PROFILES_DIR}"',
         f'dbt run  --profiles-dir "{PROFILES_DIR}"',

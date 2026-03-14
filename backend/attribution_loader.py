@@ -1,6 +1,9 @@
 """
 backend/attribution_loader.py
-Loads channel performance data from the existing DuckDB attribution tables.
+Loads channel performance data from DuckDB for the RL budget optimizer.
+
+Spend per channel = SUM(cost) from raw_clicks — computed directly from
+the uploaded dataset so it is always correct for any data provided.
 Falls back to sample data if DB is unavailable.
 """
 import duckdb
@@ -20,8 +23,13 @@ FALLBACK_DATA = [
 def load_attribution_data() -> list[dict]:
     """
     Load channel attribution + spend data from DuckDB.
+
+    Attribution revenue  → final_attribution table (dbt model)
+    Conversion counts    → raw_clicks (SUM of conversion column)
+    Historical spend     → raw_clicks SUM(cost) per channel   ← always from data
+                           Falls back to channel_spend table if raw_clicks cost is 0.
+
     Returns list of dicts: {channel, attributed_revenue, conversions, spend}.
-    spend = 0 for channels with no entry in channel_spend.
     """
     if not _DB_PATH.exists():
         return FALLBACK_DATA
@@ -29,7 +37,7 @@ def load_attribution_data() -> list[dict]:
     try:
         con = duckdb.connect(str(_DB_PATH), read_only=True)
 
-        # ── Revenue per channel from final_attribution ────────────────────
+        # ── 1. Attributed revenue from final_attribution ──────────────
         try:
             rev_rows = con.sql("""
                 SELECT
@@ -45,38 +53,70 @@ def load_attribution_data() -> list[dict]:
                 ORDER BY attributed_revenue DESC
             """).fetchall()
         except Exception:
-            rev_rows = con.sql("""
-                SELECT channel, COALESCE(val_last_touch, 0) AS attributed_revenue
-                FROM heuristic_attribution
-                ORDER BY attributed_revenue DESC
-            """).fetchall()
+            # Fallback: use heuristic_attribution if final not ready
+            try:
+                rev_rows = con.sql("""
+                    SELECT channel,
+                        GREATEST(
+                            COALESCE(val_last_touch, 0),
+                            COALESCE(val_u_shaped,   0),
+                            COALESCE(val_time_decay,  0)
+                        ) AS attributed_revenue
+                    FROM heuristic_attribution
+                    ORDER BY attributed_revenue DESC
+                """).fetchall()
+            except Exception:
+                con.close()
+                return FALLBACK_DATA
 
         if not rev_rows:
             con.close()
             return FALLBACK_DATA
 
-        # ── Conversion counts from raw_clicks ─────────────────────────────
-        conv_map = {}
+        # ── 2. Conversion counts from raw_clicks ──────────────────────
+        conv_map: dict[str, int] = {}
         try:
             for r in con.sql("""
                 SELECT channel, SUM(conversion) AS conversions
-                FROM raw_clicks
-                WHERE channel IS NOT NULL
+                FROM raw_clicks WHERE channel IS NOT NULL
                 GROUP BY channel
             """).fetchall():
                 conv_map[r[0]] = int(r[1])
         except Exception:
             pass
 
-        # ── Historical spend per channel from channel_spend seed ──────────
-        spend_map = {}
+        # ── 3. Spend = SUM(cost) from raw_clicks ─────────────────────
+        # Primary: actual cost data from the uploaded dataset.
+        # This is always correct regardless of what channel_spend.csv contains.
+        raw_spend_map: dict[str, float] = {}
         try:
-            for r in con.sql(
-                "SELECT channel, COALESCE(spend, 0) AS spend FROM channel_spend"
-            ).fetchall():
-                spend_map[r[0]] = float(r[1])
+            for r in con.sql("""
+                SELECT channel, ROUND(SUM(cost), 2) AS total_cost
+                FROM raw_clicks WHERE channel IS NOT NULL
+                GROUP BY channel
+            """).fetchall():
+                raw_spend_map[r[0]] = float(r[1])
         except Exception:
             pass
+
+        # Secondary: channel_spend seed (user-edited overrides)
+        seed_spend_map: dict[str, float] = {}
+        try:
+            for r in con.sql("""
+                SELECT channel, COALESCE(spend, 0) AS spend
+                FROM channel_spend
+                WHERE channel != '__placeholder__'
+            """).fetchall():
+                seed_spend_map[r[0]] = float(r[1])
+        except Exception:
+            pass
+
+        # Merge: seed value wins ONLY if > 0 (user explicitly set it)
+        # Otherwise raw cost is used (so any dataset works automatically)
+        def resolve_spend(channel: str) -> float:
+            seed_val = seed_spend_map.get(channel, 0.0)
+            raw_val  = raw_spend_map.get(channel, 0.0)
+            return seed_val if seed_val > 0 else raw_val
 
         con.close()
 
@@ -85,7 +125,7 @@ def load_attribution_data() -> list[dict]:
                 "channel":            r[0],
                 "attributed_revenue": float(r[1]) if r[1] else 0.0,
                 "conversions":        conv_map.get(r[0], 0),
-                "spend":              spend_map.get(r[0], 0.0),
+                "spend":              resolve_spend(r[0]),
             }
             for r in rev_rows
             if r[0] is not None
