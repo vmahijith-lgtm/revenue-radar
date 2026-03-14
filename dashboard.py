@@ -146,100 +146,116 @@ if "cache_ts"      not in st.session_state: st.session_state["cache_ts"]      = 
 ts = st.session_state["cache_ts"]
 
 # ─────────────────────────────────────────────────────────────
-# DB & cache helpers
+# DB & cache helpers — short-lived connections (no persistent lock)
 # ─────────────────────────────────────────────────────────────
-@st.cache_resource(show_spinner=False)
-def get_con():
+from contextlib import contextmanager
+
+@contextmanager
+def _query_db():
+    """Open a read-only DuckDB connection, yield it, then ALWAYS close it.
+    Never holds a lock between queries — dbt can write at any time."""
     if not DB_PATH.exists():
-        return None
+        yield None
+        return
+    con = None
     try:
-        return duckdb.connect(str(DB_PATH), read_only=True)
+        con = duckdb.connect(str(DB_PATH), read_only=True)
+        yield con
     except Exception:
-        return None
+        yield None
+    finally:
+        if con:
+            try: con.close()
+            except Exception: pass
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_kpis(_ts):
-    con = get_con()
-    if con is None: return None
-    try:
-        return con.sql("""
-            SELECT COUNT(DISTINCT user_id) AS users,
-                   SUM(conversion)         AS conversions,
-                   SUM(conversion_value)   AS revenue,
-                   SUM(cost)               AS spend
-            FROM raw_clicks
-        """).df().iloc[0]
-    except Exception:
-        return None
+    with _query_db() as con:
+        if con is None: return None
+        try:
+            return con.sql("""
+                SELECT COUNT(DISTINCT user_id) AS users,
+                       SUM(conversion)         AS conversions,
+                       SUM(conversion_value)   AS revenue,
+                       SUM(cost)               AS spend
+                FROM raw_clicks
+            """).df().iloc[0]
+        except Exception:
+            return None
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_current_channels(_ts):
-    con = get_con()
-    if con is None: return []
-    try:
-        return [r[0] for r in con.sql(
-            "SELECT DISTINCT channel FROM raw_clicks WHERE channel IS NOT NULL ORDER BY channel"
-        ).fetchall()]
-    except Exception:
-        return []
+    with _query_db() as con:
+        if con is None: return []
+        try:
+            return [r[0] for r in con.sql(
+                "SELECT DISTINCT channel FROM raw_clicks WHERE channel IS NOT NULL ORDER BY channel"
+            ).fetchall()]
+        except Exception:
+            return []
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_current_spend(_ts):
-    con = get_con()
-    if con is None: return {}
-    try:
-        return {r[0]: r[1] for r in con.sql("SELECT channel, spend FROM channel_spend").fetchall()}
-    except Exception:
-        return {}
+    with _query_db() as con:
+        if con is None: return {}
+        try:
+            return {
+                r[0]: r[1] for r in con.sql(
+                    "SELECT channel, spend FROM channel_spend "
+                    "WHERE channel != '__placeholder__'"
+                ).fetchall()
+            }
+        except Exception:
+            return {}
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_available_models_cached(_ts):
-    con = get_con()
-    if con is None: return []
-    available = []
-    for table, names in {
-        "heuristic_attribution": ["First Touch", "Last Touch", "U-Shaped", "Time Decay"],
-        "final_attribution":     ["Model Comparison"],
-        "roi_attribution":       ["ROI Comparison"],
-    }.items():
+    with _query_db() as con:
+        if con is None: return []
+        available = []
+        for table, names in {
+            "heuristic_attribution": ["First Touch", "Last Touch", "U-Shaped", "Time Decay"],
+            "final_attribution":     ["Model Comparison"],
+            "roi_attribution":       ["ROI Comparison"],
+        }.items():
+            try:
+                con.sql(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
+                available.extend(names)
+            except Exception:
+                pass
         try:
-            con.sql(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
-            available.extend(names)
+            row = con.sql("SELECT status FROM markov_attribution LIMIT 1").fetchone()
+            if row and row[0] == "success":
+                available.insert(4, "Markov Chain")
         except Exception:
             pass
-    try:
-        row = con.sql("SELECT status FROM markov_attribution LIMIT 1").fetchone()
-        if row and row[0] == "success":
-            available.insert(4, "Markov Chain")
-    except Exception:
-        pass
-    return available
+        return available
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_model_data(_ts, model_name):
-    con = get_con()
-    if con is None: return None, None
-    try:
-        if model_name == "Model Comparison":
-            df = con.sql("SELECT channel,val_first_touch,val_last_touch,val_u_shaped,val_time_decay,val_markov FROM final_attribution").df()
-            plot_df = df.melt("channel", var_name="model", value_name="revenue")
-            plot_df["model"] = plot_df["model"].map(MODEL_LABELS)
-        elif model_name == "ROI Comparison":
-            df = con.sql("SELECT channel,roi_first_touch,roi_last_touch,roi_u_shaped,roi_time_decay,roi_markov FROM roi_attribution").df()
-            plot_df = df.melt("channel", var_name="model", value_name="roi_pct")
-            plot_df["model"] = plot_df["model"].map(MODEL_LABELS)
-        else:
-            cfg = MODELS[model_name]
-            df = con.sql(f"SELECT channel, {cfg['col']} AS value FROM {cfg['table']} ORDER BY 2 DESC").df()
-            plot_df = df.assign(model=model_name)
-        return df, plot_df
-    except Exception:
-        return None, None
+    with _query_db() as con:
+        if con is None: return None, None
+        try:
+            if model_name == "Model Comparison":
+                df = con.sql("SELECT channel,val_first_touch,val_last_touch,val_u_shaped,val_time_decay,val_markov FROM final_attribution").df()
+                plot_df = df.melt("channel", var_name="model", value_name="revenue")
+                plot_df["model"] = plot_df["model"].map(MODEL_LABELS)
+            elif model_name == "ROI Comparison":
+                df = con.sql("SELECT channel,roi_first_touch,roi_last_touch,roi_u_shaped,roi_time_decay,roi_markov FROM roi_attribution").df()
+                plot_df = df.melt("channel", var_name="model", value_name="roi_pct")
+                plot_df["model"] = plot_df["model"].map(MODEL_LABELS)
+            else:
+                cfg = MODELS[model_name]
+                df = con.sql(f"SELECT channel, {cfg['col']} AS value FROM {cfg['table']} ORDER BY 2 DESC").df()
+                plot_df = df.assign(model=model_name)
+            return df, plot_df
+        except Exception:
+            return None, None
 
 
 # ─────────────────────────────────────────────────────────────
@@ -289,8 +305,8 @@ def run_dbt_pipeline():
 
 
 def bust_caches():
-    st.cache_data.clear()
-    st.cache_resource.clear()
+    st.cache_data.clear()   # clears all @st.cache_data results
+    # No cache_resource to clear — connections are short-lived now
     st.session_state["cache_ts"] += 1
 
 
@@ -358,9 +374,6 @@ def render_upload_form(key_prefix: str):
 
     if st.button("🚀 Run Attribution", type="primary", use_container_width=True, key=f"{key_prefix}_run"):
         with st.status("Running pipeline…", expanded=True) as status:
-            # Release read-only connection FIRST so write operations can proceed
-            st.cache_resource.clear()
-
             st.write("📝 Loading data into DuckDB…")
             try:
                 n = ingest_to_duckdb(df_raw)
@@ -422,8 +435,6 @@ with st.sidebar:
                     )
                 if st.button("💾 Save & Rerun", use_container_width=True, type="primary"):
                     with st.spinner("Updating…"):
-                        # Release read-only connection before dbt writes
-                        st.cache_resource.clear()
                         write_channel_spend_csv(existing_channels, spend_map=updated_spend)
                         ok, log = run_dbt_pipeline()
                         if ok:
