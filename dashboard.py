@@ -335,14 +335,25 @@ def render_upload_form(key_prefix: str):
     with st.expander("Preview (first 5 rows)"):
         st.dataframe(df_raw.head(5), use_container_width=True)
 
-    st.markdown("**💰 Set channel spend (used to calculate ROI)**")
+    st.markdown("**💰 Channel Spend** *(used for ROI calculation)*")
+    st.caption("Pre-filled from your data's cost column. Adjust if needed.")
     existing_spend = fetch_current_spend(ts)
+
+    # Compute per-channel cost sum from the uploaded CSV (logically: actual ad spend)
+    cost_by_channel = (
+        df_raw.groupby("channel")["cost"].sum().to_dict()
+        if "cost" in df_raw.columns else {}
+    )
+
     spend_map = {}
     for ch in channels:
+        # Priority: previously saved → actual data cost → 0
+        default_val = existing_spend.get(ch, cost_by_channel.get(ch, 0))
+        safe_key = f"{key_prefix}_spend_{ch.replace(' ','_').replace('/','_')}"
         spend_map[ch] = st.number_input(
             ch, min_value=0,
-            value=int(existing_spend.get(ch, DEFAULT_SPEND)),
-            step=500, key=f"{key_prefix}_spend_{ch}",
+            value=max(0, int(round(default_val))),
+            step=100, key=safe_key,
         )
 
     if st.button("🚀 Run Attribution", type="primary", use_container_width=True, key=f"{key_prefix}_run"):
@@ -397,10 +408,11 @@ with st.sidebar:
                 st.caption("Adjust spend and re-run dbt to update ROI.")
                 updated_spend = {}
                 for ch in existing_channels:
+                    safe_key = f"spend_ex_{ch.replace(' ','_').replace('/','_')}"
                     updated_spend[ch] = st.number_input(
                         ch, min_value=0,
-                        value=int(existing_spend.get(ch, DEFAULT_SPEND)),
-                        step=500, key=f"spend_ex_{ch}",
+                        value=max(0, int(existing_spend.get(ch, 0))),
+                        step=100, key=safe_key,
                     )
                 if st.button("💾 Save & Rerun", use_container_width=True, type="primary"):
                     with st.spinner("Updating…"):

@@ -125,11 +125,13 @@ with preview_col:
         df_prev = pd.DataFrame(preview["data"])
         df_prev["attributed_revenue"] = df_prev["attributed_revenue"].map("${:,.0f}".format)
         df_prev["conversions"]        = df_prev["conversions"].map("{:,}".format)
-        df_prev.columns               = ["Channel", "Attributed Revenue", "Conversions"]
+        df_prev["spend"]              = df_prev["spend"].map("${:,.0f}".format)
+        df_prev = df_prev[["channel","attributed_revenue","spend","conversions"]]
+        df_prev.columns = ["Channel", "Attributed Revenue", "Historical Spend", "Conversions"]
         st.dataframe(df_prev, use_container_width=True, hide_index=True)
-        st.caption(f"Source: **{preview.get('data_source', 'DuckDB')}** · {preview.get('count', len(preview['data']))} channels")
+        st.caption(f"{preview.get('count', len(preview['data']))} channels · source: **{preview.get('data_source', 'DuckDB')}**")
     else:
-        st.info("No attribution data available. Run `python run_pipeline.py` after uploading data.")
+        st.info("No attribution data. Upload data via the Attribution Dashboard first.")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -174,6 +176,20 @@ if run_btn:
     k4.metric("Estimated ROI",       f"{data['expected_roi_index']:+.1f}%")
 
     st.caption(f"📦 Data source: **{data.get('data_source', '')}**")
+
+    # Warn if spend data is mostly zero (ROI estimate will be unreliable)
+    zero_spend_channels = [a["channel"] for a in allocations if a.get("spend", 0) == 0] if allocations else []
+    raw_allocs = data.get("allocations", [])
+    spend_vals = [a.get("budget_percent", 0) for a in raw_allocs]  # proxy check via API data
+    if preview and preview.get("data"):
+        no_spend = sum(1 for d in preview["data"] if d.get("spend", 0) == 0)
+        if no_spend > len(preview["data"]) / 2:
+            st.warning(
+                f"⚠️ **{no_spend} of {len(preview['data'])} channels have no recorded spend.** "
+                "Estimated Revenue and ROI are approximations. "
+                "Set actual spend values in the Attribution Dashboard → Spend tab for accurate ROI."
+            )
+
     st.markdown("<hr>", unsafe_allow_html=True)
 
     chart_col, table_col = st.columns([3, 2], gap="large")

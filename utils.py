@@ -9,7 +9,7 @@ PROJECT_ROOT     = Path(__file__).resolve().parent
 DB_PATH          = PROJECT_ROOT / "attribution_project" / "dev.duckdb"
 CHANNEL_SPEND_CSV = PROJECT_ROOT / "attribution_project" / "seeds" / "channel_spend.csv"
 
-DEFAULT_SPEND = 10_000  # default $ spend per channel if not specified
+DEFAULT_SPEND = 0  # unknown spend defaults to 0 (user should fill in their actual spend)
 
 
 def get_channels_from_db(db_path: Path = DB_PATH) -> list[str]:
