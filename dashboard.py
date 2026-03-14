@@ -9,11 +9,10 @@ from utils import (
     write_channel_spend_csv,
     sync_channel_spend_from_db,
     DEFAULT_SPEND,
-    CHANNEL_SPEND_CSV,
 )
 
 # ─────────────────────────────────────────────────────────────
-# Page config (must be first)
+# Page config
 # ─────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Attribution Engine",
@@ -21,6 +20,104 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# ─────────────────────────────────────────────────────────────
+# Custom CSS
+# ─────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+/* ── Hide Streamlit chrome ── */
+#MainMenu, footer, header { visibility: hidden; }
+.block-container { padding-top: 1.5rem; padding-bottom: 2rem; }
+
+/* ── Global typography ── */
+html, body, [class*="css"] {
+    font-family: 'Inter', 'Segoe UI', sans-serif;
+}
+
+/* ── KPI cards ── */
+[data-testid="metric-container"] {
+    background: linear-gradient(135deg, rgba(124,58,237,0.12), rgba(139,92,246,0.06));
+    border: 1px solid rgba(124,58,237,0.25);
+    border-radius: 14px;
+    padding: 1rem 1.25rem;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+[data-testid="metric-container"]:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(124,58,237,0.18);
+}
+[data-testid="metric-container"] [data-testid="stMetricLabel"] {
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #a78bfa;
+}
+[data-testid="metric-container"] [data-testid="stMetricValue"] {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: #f1f5f9;
+}
+
+/* ── Sidebar ── */
+[data-testid="stSidebar"] {
+    background: #0f0f1a;
+    border-right: 1px solid rgba(124,58,237,0.2);
+}
+[data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {
+    color: #c4b5fd;
+}
+
+/* ── Section cards (chart + table) ── */
+.card {
+    background: rgba(26,26,46,0.7);
+    border: 1px solid rgba(124,58,237,0.15);
+    border-radius: 16px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1rem;
+}
+
+/* ── Page title ── */
+.page-title {
+    font-size: 1.8rem;
+    font-weight: 800;
+    background: linear-gradient(90deg, #c4b5fd, #818cf8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 0.1rem;
+}
+.page-subtitle {
+    font-size: 0.85rem;
+    color: #64748b;
+    margin-bottom: 1.5rem;
+}
+
+/* ── Upload button ── */
+[data-testid="stFileUploader"] {
+    border: 1.5px dashed rgba(124,58,237,0.4);
+    border-radius: 10px;
+    padding: 0.5rem;
+}
+
+/* ── Tabs ── */
+[data-testid="stTabs"] button {
+    font-size: 0.82rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+/* ── Divider ── */
+hr { border-color: rgba(124,58,237,0.15); margin: 1rem 0; }
+
+/* ── Buttons ── */
+[data-testid="baseButton-primary"] {
+    background: linear-gradient(135deg, #7c3aed, #6d28d9) !important;
+    border: none !important;
+    font-weight: 600;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────
 # Paths
@@ -31,7 +128,7 @@ DBT_PROJECT_DIR = PROJECT_ROOT / "attribution_project"
 PROFILES_DIR    = PROJECT_ROOT / "profiles"
 
 # ─────────────────────────────────────────────────────────────
-# Schema
+# Constants
 # ─────────────────────────────────────────────────────────────
 REQUIRED_COLS = {"event_id", "user_id", "timestamp", "channel", "conversion", "conversion_value"}
 
@@ -53,27 +150,27 @@ MODEL_LABELS = {
 }
 
 MODELS = {
-    "First Touch":      {"table": "heuristic_attribution", "col": "val_first_touch"},
-    "Last Touch":       {"table": "heuristic_attribution", "col": "val_last_touch"},
-    "U-Shaped":         {"table": "heuristic_attribution", "col": "val_u_shaped"},
-    "Time Decay":       {"table": "heuristic_attribution", "col": "val_time_decay"},
-    "Markov Chain":     {"table": "markov_attribution",    "col": "attributed_value"},
-    "Model Comparison": {"table": "final_attribution",     "col": None},
-    "ROI Comparison":   {"table": "roi_attribution",       "col": None},
+    "First Touch":      {"table": "heuristic_attribution", "col": "val_first_touch",  "group": "Single Model"},
+    "Last Touch":       {"table": "heuristic_attribution", "col": "val_last_touch",   "group": "Single Model"},
+    "U-Shaped":         {"table": "heuristic_attribution", "col": "val_u_shaped",     "group": "Single Model"},
+    "Time Decay":       {"table": "heuristic_attribution", "col": "val_time_decay",   "group": "Single Model"},
+    "Markov Chain":     {"table": "markov_attribution",    "col": "attributed_value", "group": "Single Model"},
+    "Model Comparison": {"table": "final_attribution",     "col": None,               "group": "Compare"},
+    "ROI Comparison":   {"table": "roi_attribution",       "col": None,               "group": "Compare"},
 }
 
 MODEL_DESC = {
-    "First Touch":      "100% credit to the first channel.",
-    "Last Touch":       "100% credit to the last channel.",
-    "U-Shaped":         "40/40/20 split: first, last, middle.",
-    "Time Decay":       "Exponential credit toward conversion.",
-    "Markov Chain":     "Data-driven removal-effect attribution.",
-    "Model Comparison": "Side-by-side revenue across all models.",
-    "ROI Comparison":   "ROI% per channel per model.",
+    "First Touch":      "100% credit to the first touchpoint.",
+    "Last Touch":       "100% credit to the last touchpoint before conversion.",
+    "U-Shaped":         "40% first · 40% last · 20% distributed across middle touches.",
+    "Time Decay":       "Exponentially more credit to touches closer to conversion.",
+    "Markov Chain":     "Data-driven: credit based on how much conversions drop when each channel is removed.",
+    "Model Comparison": "All attribution models side-by-side for every channel.",
+    "ROI Comparison":   "Return on spend % per channel, across all attribution models.",
 }
 
 # ─────────────────────────────────────────────────────────────
-# DB helpers
+# DB & cache helpers
 # ─────────────────────────────────────────────────────────────
 @st.cache_resource(show_spinner=False)
 def get_con():
@@ -104,28 +201,24 @@ def fetch_kpis(_ts):
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_current_channels(_ts):
-    """Return channels currently in the DB (for spend editor)."""
     con = get_con()
     if con is None:
         return []
     try:
-        rows = con.sql(
+        return [r[0] for r in con.sql(
             "SELECT DISTINCT channel FROM raw_clicks WHERE channel IS NOT NULL ORDER BY channel"
-        ).fetchall()
-        return [r[0] for r in rows]
+        ).fetchall()]
     except Exception:
         return []
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_current_spend(_ts):
-    """Return current channel spend from DuckDB seed table."""
     con = get_con()
     if con is None:
         return {}
     try:
-        rows = con.sql("SELECT channel, spend FROM channel_spend").fetchall()
-        return {r[0]: r[1] for r in rows}
+        return {r[0]: r[1] for r in con.sql("SELECT channel, spend FROM channel_spend").fetchall()}
     except Exception:
         return {}
 
@@ -136,12 +229,11 @@ def get_available_models_cached(_ts):
     if con is None:
         return []
     available = []
-    checks = {
+    for table, names in {
         "heuristic_attribution": ["First Touch", "Last Touch", "U-Shaped", "Time Decay"],
         "final_attribution":     ["Model Comparison"],
         "roi_attribution":       ["ROI Comparison"],
-    }
-    for table, names in checks.items():
+    }.items():
         try:
             con.sql(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
             available.extend(names)
@@ -163,24 +255,16 @@ def fetch_model_data(_ts, model_name):
         return None, None
     try:
         if model_name == "Model Comparison":
-            df = con.sql(
-                "SELECT channel,val_first_touch,val_last_touch,val_u_shaped,val_time_decay,val_markov "
-                "FROM final_attribution"
-            ).df()
+            df = con.sql("SELECT channel,val_first_touch,val_last_touch,val_u_shaped,val_time_decay,val_markov FROM final_attribution").df()
             plot_df = df.melt("channel", var_name="model", value_name="revenue")
             plot_df["model"] = plot_df["model"].map(MODEL_LABELS)
         elif model_name == "ROI Comparison":
-            df = con.sql(
-                "SELECT channel,roi_first_touch,roi_last_touch,roi_u_shaped,roi_time_decay,roi_markov "
-                "FROM roi_attribution"
-            ).df()
+            df = con.sql("SELECT channel,roi_first_touch,roi_last_touch,roi_u_shaped,roi_time_decay,roi_markov FROM roi_attribution").df()
             plot_df = df.melt("channel", var_name="model", value_name="roi_pct")
             plot_df["model"] = plot_df["model"].map(MODEL_LABELS)
         else:
             cfg = MODELS[model_name]
-            df = con.sql(
-                f"SELECT channel, {cfg['col']} AS value FROM {cfg['table']} ORDER BY 2 DESC"
-            ).df()
+            df = con.sql(f"SELECT channel, {cfg['col']} AS value FROM {cfg['table']} ORDER BY 2 DESC").df()
             plot_df = df.assign(model=model_name)
         return df, plot_df
     except Exception:
@@ -188,14 +272,14 @@ def fetch_model_data(_ts, model_name):
 
 
 # ─────────────────────────────────────────────────────────────
-# Upload helpers
+# Upload / pipeline helpers
 # ─────────────────────────────────────────────────────────────
-def validate_csv(df: pd.DataFrame):
+def validate_csv(df):
     missing = REQUIRED_COLS - set(df.columns)
     if missing:
         return False, f"Missing columns: **{', '.join(sorted(missing))}**"
     if len(df) == 0:
-        return False, "File contains no data rows."
+        return False, "File has no data rows."
     return True, "OK"
 
 
@@ -242,10 +326,8 @@ def bust_caches():
 # ─────────────────────────────────────────────────────────────
 # Session state
 # ─────────────────────────────────────────────────────────────
-if "cache_ts"         not in st.session_state: st.session_state["cache_ts"]         = 0
-if "upload_df"        not in st.session_state: st.session_state["upload_df"]        = None
-if "upload_channels"  not in st.session_state: st.session_state["upload_channels"]  = []
-if "spend_confirmed"  not in st.session_state: st.session_state["spend_confirmed"]  = False
+if "cache_ts" not in st.session_state:
+    st.session_state["cache_ts"] = 0
 
 ts = st.session_state["cache_ts"]
 
@@ -254,107 +336,96 @@ ts = st.session_state["cache_ts"]
 # ─────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## 🛡️ Attribution Engine")
-    st.markdown("---")
+    st.markdown("<hr>", unsafe_allow_html=True)
 
-    # ── Upload ───────────────────────────────────────────────
-    st.markdown("### 📥 Upload Click Data")
-    st.caption("Required columns: `event_id`, `user_id`, `timestamp`, `channel`, `conversion`, `conversion_value`")
+    # ── Upload tab ───────────────────────────────────────────
+    upload_tab, spend_tab = st.tabs(["📥 Upload", "💰 Spend"])
 
-    st.download_button(
-        "📄 Download sample template",
-        SAMPLE_CSV,
-        file_name="sample_clicks.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
+    with upload_tab:
+        st.caption("Upload your clickstream CSV. Required: `event_id`, `user_id`, `timestamp`, `channel`, `conversion`, `conversion_value`.")
 
-    uploaded_file = st.file_uploader("Upload CSV", type=["csv"], label_visibility="collapsed")
+        st.download_button(
+            "📄 Download template",
+            SAMPLE_CSV,
+            file_name="sample_clicks.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
 
-    if uploaded_file:
-        try:
-            df_raw = pd.read_csv(uploaded_file)
-        except Exception as e:
-            st.error(f"Cannot read file: {e}")
-            df_raw = None
+        uploaded_file = st.file_uploader("", type=["csv"], label_visibility="collapsed")
 
-        if df_raw is not None:
-            ok, msg = validate_csv(df_raw)
-            if not ok:
-                st.error(f"❌ {msg}")
-            else:
-                channels = get_channels_from_df(df_raw)
-                st.success(f"✅ {len(df_raw):,} rows · **{len(channels)} channels** detected")
+        if uploaded_file:
+            try:
+                df_raw = pd.read_csv(uploaded_file)
+            except Exception as e:
+                st.error(f"Cannot read file: {e}")
+                df_raw = None
 
-                with st.expander("Preview data"):
-                    st.dataframe(df_raw.head(5), use_container_width=True)
+            if df_raw is not None:
+                ok, msg = validate_csv(df_raw)
+                if not ok:
+                    st.error(f"❌ {msg}")
+                else:
+                    channels = get_channels_from_df(df_raw)
+                    st.success(f"✅ **{len(df_raw):,} rows** · {len(channels)} channels")
 
-                # ── Per-channel spend config ─────────────────
-                st.markdown("#### 💰 Set Channel Spend")
-                st.caption(
-                    "Enter how much was spent on each channel. "
-                    "This is used to calculate ROI. Leave at 0 if unknown."
-                )
+                    with st.expander("Preview"):
+                        st.dataframe(df_raw.head(5), use_container_width=True)
 
-                # Prefill from existing spend data if available
-                existing_spend = fetch_current_spend(ts)
-                spend_map = {}
-                for ch in channels:
-                    default_val = int(existing_spend.get(ch, DEFAULT_SPEND))
-                    spend_map[ch] = st.number_input(
-                        ch,
-                        min_value=0,
-                        value=default_val,
-                        step=500,
-                        key=f"spend_{ch}",
-                    )
+                    st.markdown("**Set channel spend (for ROI)**")
+                    existing_spend = fetch_current_spend(ts)
+                    spend_map = {}
+                    for ch in channels:
+                        spend_map[ch] = st.number_input(
+                            ch, min_value=0,
+                            value=int(existing_spend.get(ch, DEFAULT_SPEND)),
+                            step=500, key=f"spend_up_{ch}",
+                        )
 
-                if st.button("🚀 Run Attribution", type="primary", use_container_width=True):
-                    with st.status("Running pipeline…", expanded=True) as status:
-                        st.write("📝 Writing data to DuckDB…")
-                        try:
-                            n = ingest_to_duckdb(df_raw)
-                            st.write(f"   ✔ {n:,} rows loaded into `raw_clicks`")
-                        except Exception as e:
-                            status.update(label="Ingestion failed", state="error")
-                            st.error(str(e))
-                            st.stop()
+                    if st.button("🚀 Run Attribution", type="primary", use_container_width=True):
+                        with st.status("Running…", expanded=True) as status:
+                            st.write("📝 Loading data into DuckDB…")
+                            try:
+                                n = ingest_to_duckdb(df_raw)
+                                st.write(f"   ✔ {n:,} rows loaded")
+                            except Exception as e:
+                                status.update(label="Failed", state="error")
+                                st.error(str(e))
+                                st.stop()
 
-                        st.write("💰 Saving channel spend config…")
-                        write_channel_spend_csv(channels, spend_map=spend_map)
-                        st.write(f"   ✔ {len(channels)} channels written to `channel_spend.csv`")
+                            st.write("💰 Saving channel spend…")
+                            write_channel_spend_csv(channels, spend_map=spend_map)
 
-                        st.write("⚙️ Running dbt models…")
-                        ok, log = run_dbt_pipeline()
+                            st.write("⚙️ Running dbt models…")
+                            ok, log = run_dbt_pipeline()
 
-                        if ok:
-                            status.update(label="✅ Done!", state="complete")
-                            bust_caches()
-                            st.rerun()
-                        else:
-                            status.update(label="dbt failed", state="error")
-                            with st.expander("Error log"):
-                                st.code(log, language="bash")
+                            if ok:
+                                status.update(label="✅ Complete!", state="complete")
+                                bust_caches()
+                                st.rerun()
+                            else:
+                                status.update(label="dbt failed", state="error")
+                                with st.expander("Error log"):
+                                    st.code(log, language="bash")
 
-    # ── Channel Spend Editor (when data already in DB) ───────
-    elif DB_PATH.exists():
-        st.markdown("### 💰 Channel Spend")
-        st.caption("Edit spend values and click **Save & Rerun** to update ROI.")
+    with spend_tab:
         existing_channels = fetch_current_channels(ts)
         existing_spend    = fetch_current_spend(ts)
 
-        if existing_channels:
+        if not existing_channels:
+            st.info("Upload data first to configure channel spend.")
+        else:
+            st.caption("Edit spend per channel and rerun dbt to update ROI.")
             updated_spend = {}
             for ch in existing_channels:
                 updated_spend[ch] = st.number_input(
-                    ch,
-                    min_value=0,
+                    ch, min_value=0,
                     value=int(existing_spend.get(ch, DEFAULT_SPEND)),
-                    step=500,
-                    key=f"existing_spend_{ch}",
+                    step=500, key=f"spend_ex_{ch}",
                 )
 
-            if st.button("💾 Save & Rerun dbt", use_container_width=True):
-                with st.spinner("Updating…"):
+            if st.button("💾 Save & Rerun", use_container_width=True, type="primary"):
+                with st.spinner("Updating ROI…"):
                     write_channel_spend_csv(existing_channels, spend_map=updated_spend)
                     ok, log = run_dbt_pipeline()
                     if ok:
@@ -365,16 +436,17 @@ with st.sidebar:
                         with st.expander("Error log"):
                             st.code(log, language="bash")
 
-    st.markdown("---")
-    st.caption("💡 To run dbt models manually: `python run_pipeline.py`  \n💡 To generate synthetic data: `python sample1.py`")
+    st.markdown("<hr>", unsafe_allow_html=True)
+    st.caption("dbt only: `python run_pipeline.py`  \nSynthetic data: `python sample1.py`")
 
 
 # ─────────────────────────────────────────────────────────────
-# MAIN – guard: no DB yet
+# MAIN — No data guard
 # ─────────────────────────────────────────────────────────────
 if not DB_PATH.exists():
-    st.title("🛡️ Attribution Engine")
-    st.info("👈 **No data yet.** Upload a CSV in the sidebar, or run `python run_pipeline.py` to generate synthetic data.")
+    st.markdown('<p class="page-title">🛡️ Attribution Engine</p>', unsafe_allow_html=True)
+    st.markdown('<p class="page-subtitle">Multi-touch marketing attribution · powered by dbt + DuckDB</p>', unsafe_allow_html=True)
+    st.info("👈 **No data yet.** Upload a CSV in the sidebar to get started.")
     st.stop()
 
 con = get_con()
@@ -383,77 +455,101 @@ if con is None:
     st.stop()
 
 # ─────────────────────────────────────────────────────────────
+# Header
+# ─────────────────────────────────────────────────────────────
+st.markdown('<p class="page-title">🛡️ Attribution Engine</p>', unsafe_allow_html=True)
+st.markdown('<p class="page-subtitle">Multi-touch marketing attribution · powered by dbt + DuckDB</p>', unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────
 # KPI row
 # ─────────────────────────────────────────────────────────────
-st.markdown("## 🛡️ Attribution Dashboard")
-
 kpis = fetch_kpis(ts)
 if kpis is not None:
     spend   = float(kpis["spend"])
     revenue = float(kpis["revenue"])
     roi     = ((revenue - spend) / spend * 100) if spend > 0 else 0
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("👤 Users",       f"{int(kpis['users']):,}")
-    c2.metric("✅ Conversions", f"{int(kpis['conversions']):,}")
-    c3.metric("💰 Revenue",     f"${revenue:,.0f}")
-    c4.metric("📢 Spend",       f"${spend:,.0f}")
-    c5.metric("📈 Blended ROI", f"{roi:.1f}%")
-    st.markdown("---")
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("Users",        f"{int(kpis['users']):,}")
+    k2.metric("Conversions",  f"{int(kpis['conversions']):,}")
+    k3.metric("Revenue",      f"${revenue:,.0f}")
+    k4.metric("Ad Spend",     f"${spend:,.0f}")
+    k5.metric("Blended ROI",  f"{roi:.1f}%")
+
+st.markdown("<hr>", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────
-# Model selector
+# Model selector — tabs grouped by type
 # ─────────────────────────────────────────────────────────────
 valid_models = get_available_models_cached(ts)
 
 if not valid_models:
-    st.warning("No attribution models found. Run the pipeline first.")
+    st.warning("No attribution models built yet. Run the pipeline first.")
     st.stop()
 
-col_sel, col_info = st.columns([3, 1])
-with col_sel:
-    selected = st.selectbox("Attribution Model", valid_models, label_visibility="collapsed")
-with col_info:
-    st.caption(MODEL_DESC.get(selected, ""))
+single_models  = [m for m in valid_models if MODELS[m]["group"] == "Single Model"]
+compare_models = [m for m in valid_models if MODELS[m]["group"] == "Compare"]
 
-# ─────────────────────────────────────────────────────────────
-# Fetch & render
-# ─────────────────────────────────────────────────────────────
-with st.spinner("Loading…"):
-    df, plot_df = fetch_model_data(ts, selected)
+tab_labels = single_models + compare_models
+tabs = st.tabs(tab_labels)
+selected_tabs = dict(zip(tab_labels, tabs))
 
-if df is None:
-    st.error(f"Could not load data for **{selected}**.")
-    st.stop()
+for model_name, tab in selected_tabs.items():
+    with tab:
+        st.caption(MODEL_DESC.get(model_name, ""))
 
-chart_col, table_col = st.columns([3, 2])
+        with st.spinner("Loading…"):
+            df, plot_df = fetch_model_data(ts, model_name)
 
-with chart_col:
-    st.subheader(selected)
-    if selected == "Model Comparison":
-        fig = px.bar(plot_df, x="channel", y="revenue",  color="model", barmode="group",
-                     labels={"revenue": "Attributed Revenue ($)", "channel": "Channel"})
-    elif selected == "ROI Comparison":
-        fig = px.bar(plot_df, x="channel", y="roi_pct",  color="model", barmode="group",
-                     labels={"roi_pct": "ROI (%)", "channel": "Channel"})
-        fig.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.4)
-    else:
-        fig = px.bar(plot_df, x="channel", y="value", color="channel",
-                     labels={"value": "Attributed Revenue ($)", "channel": "Channel"})
+        if df is None:
+            st.error(f"No data for **{model_name}**. Run the pipeline first.")
+            continue
 
-    fig.update_layout(
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
-        margin=dict(l=0, r=0, t=30, b=0),
-    )
-    st.plotly_chart(fig, use_container_width=True)
+        chart_col, table_col = st.columns([3, 2], gap="large")
 
-with table_col:
-    st.subheader("Data Table")
-    st.dataframe(df, use_container_width=True, height=380)
-    st.download_button(
-        "⬇️ Export as CSV",
-        df.to_csv(index=False).encode(),
-        file_name=f"{selected.replace(' ','_').lower()}.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
+        with chart_col:
+            if model_name == "Model Comparison":
+                fig = px.bar(
+                    plot_df, x="channel", y="revenue", color="model", barmode="group",
+                    color_discrete_sequence=px.colors.qualitative.Vivid,
+                    labels={"revenue": "Attributed Revenue ($)", "channel": ""},
+                )
+            elif model_name == "ROI Comparison":
+                fig = px.bar(
+                    plot_df, x="channel", y="roi_pct", color="model", barmode="group",
+                    color_discrete_sequence=px.colors.qualitative.Vivid,
+                    labels={"roi_pct": "ROI (%)", "channel": ""},
+                )
+                fig.add_hline(y=0, line_dash="dot", line_color="rgba(255,255,255,0.3)")
+            else:
+                fig = px.bar(
+                    plot_df, x="channel", y="value", color="channel",
+                    color_discrete_sequence=px.colors.qualitative.Vivid,
+                    labels={"value": "Attributed Revenue ($)", "channel": ""},
+                )
+
+            fig.update_layout(
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#e2e8f0", size=12),
+                legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
+                xaxis=dict(gridcolor="rgba(255,255,255,0.05)", tickfont=dict(size=11)),
+                yaxis=dict(gridcolor="rgba(255,255,255,0.07)"),
+                margin=dict(l=0, r=0, t=10, b=0),
+                bargap=0.2,
+            )
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+        with table_col:
+            st.dataframe(
+                df.style.format({col: "{:,.2f}" for col in df.select_dtypes("number").columns}),
+                use_container_width=True,
+                height=360,
+            )
+            st.download_button(
+                "⬇️ Export CSV",
+                df.to_csv(index=False).encode(),
+                file_name=f"{model_name.replace(' ','_').lower()}.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key=f"dl_{model_name}",
+            )
