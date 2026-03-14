@@ -40,6 +40,8 @@ class BudgetResponse(BaseModel):
     total_budget:       float
     expected_roi_index: float
     data_source:        str
+    algorithm:          str
+    episodes_run:       int
     allocations:        list[ChannelAllocation]
 
 
