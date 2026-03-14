@@ -161,23 +161,27 @@ def optimize_budget_allocation(
         )
         history.append(net_reward)
 
-    # ── Compute meaningful ROI estimate ──────────────────────
-    # Scale the log-utility output to dollar revenue using total historical
-    # attributed revenue as the reference scale.
-    total_attributed_revenue = sum(d["attributed_revenue"] for d in attribution_data)
+    # ── Compute realistic estimated revenue using historical ROAS ─
+    # ROAS (Return on Ad Spend) = attributed_revenue / historical_spend
+    # Estimated new revenue = ROAS × recommended_spend (linear projection)
+    # For zero-spend channels, use the average ROAS of known channels.
+    roas_list = []
+    for d in attribution_data:
+        if d.get("spend", 0) > 0:
+            roas_list.append(d["attributed_revenue"] / d["spend"])
 
-    # Estimated revenue with the recommended spending (log diminishing returns, scaled)
-    # Normalise by log(1 + historical avg spend) to anchor to observed revenue
-    historical_avg_spend = total_budget / len(arms)   # proxy for typical spend per channel
-    rev_scale = total_attributed_revenue / max(
-        sum(arm.weight * np.log1p(historical_avg_spend) for arm in arms), 1e-9
-    )
+    avg_roas = float(sum(roas_list) / len(roas_list)) if roas_list else 3.0  # 3× default
 
-    estimated_revenue = sum(
-        arm.weight * np.log1p(s) * rev_scale
-        for arm, s in zip(arms, spend)
-    )
-    roi_pct = (estimated_revenue - total_budget) / total_budget * 100
+    estimated_revenue = 0.0
+    for d, s in zip(attribution_data, spend):
+        hist_spend = d.get("spend", 0)
+        if hist_spend > 0:
+            channel_roas = d["attributed_revenue"] / hist_spend
+        else:
+            channel_roas = avg_roas
+        estimated_revenue += channel_roas * s
+
+    roi_pct = (estimated_revenue - total_budget) / total_budget * 100 if total_budget > 0 else 0.0
 
     # Final allocation percentages
     total_spent = spend.sum()
@@ -187,7 +191,7 @@ def optimize_budget_allocation(
         "channels":            [arm.channel for arm in arms],
         "allocation_pcts":     alloc_pcts,
         "recommended_budgets": spend.tolist(),
-        "expected_roi_index":  round(roi_pct, 1),        # estimated ROI %
+        "expected_roi_index":  round(roi_pct, 1),
         "estimated_revenue":   round(estimated_revenue, 2),
         "episodes_run":        n_steps,
         "algorithm":           "Incremental Thompson Sampling (Beta-Bernoulli bandit)",

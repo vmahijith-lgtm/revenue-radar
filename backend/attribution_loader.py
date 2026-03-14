@@ -6,23 +6,22 @@ Falls back to sample data if DB is unavailable.
 import duckdb
 from pathlib import Path
 
-# Path to the existing attribution DuckDB
 _DB_PATH = Path(__file__).resolve().parents[1] / "attribution_project" / "dev.duckdb"
 
-# Fallback sample data (used when DB is not available)
 FALLBACK_DATA = [
-    {"channel": "Paid Search",    "attributed_revenue": 68000, "conversions": 500},
-    {"channel": "Organic Search", "attributed_revenue": 42000, "conversions": 350},
-    {"channel": "Social Media",   "attributed_revenue": 25000, "conversions": 210},
-    {"channel": "Email",          "attributed_revenue": 15000, "conversions": 140},
-    {"channel": "Direct",         "attributed_revenue": 20000, "conversions": 180},
+    {"channel": "Paid Search",    "attributed_revenue": 68000, "conversions": 500, "spend": 15000},
+    {"channel": "Organic Search", "attributed_revenue": 42000, "conversions": 350, "spend":  5000},
+    {"channel": "Social Media",   "attributed_revenue": 25000, "conversions": 210, "spend": 12000},
+    {"channel": "Email",          "attributed_revenue": 15000, "conversions": 140, "spend":  3000},
+    {"channel": "Direct",         "attributed_revenue": 20000, "conversions": 180, "spend":     0},
 ]
 
 
 def load_attribution_data() -> list[dict]:
     """
-    Load channel attribution data from DuckDB (final_attribution table).
-    Returns list of dicts with: channel, attributed_revenue, conversions.
+    Load channel attribution + spend data from DuckDB.
+    Returns list of dicts: {channel, attributed_revenue, conversions, spend}.
+    spend = 0 for channels with no entry in channel_spend.
     """
     if not _DB_PATH.exists():
         return FALLBACK_DATA
@@ -30,48 +29,65 @@ def load_attribution_data() -> list[dict]:
     try:
         con = duckdb.connect(str(_DB_PATH), read_only=True)
 
-        # Try final_attribution first (has all model values)
+        # ── Revenue per channel from final_attribution ────────────────────
         try:
-            rows = con.sql("""
+            rev_rows = con.sql("""
                 SELECT
                     channel,
-                    GREATEST(val_first_touch, val_last_touch, val_u_shaped,
-                             val_time_decay, COALESCE(val_markov, 0)) AS attributed_revenue
+                    GREATEST(
+                        COALESCE(val_first_touch, 0),
+                        COALESCE(val_last_touch,  0),
+                        COALESCE(val_u_shaped,    0),
+                        COALESCE(val_time_decay,  0),
+                        COALESCE(val_markov,      0)
+                    ) AS attributed_revenue
                 FROM final_attribution
                 ORDER BY attributed_revenue DESC
             """).fetchall()
-            cols = ["channel", "attributed_revenue"]
         except Exception:
-            # Fallback: use heuristic_attribution
-            rows = con.sql("""
-                SELECT channel, val_last_touch AS attributed_revenue
+            rev_rows = con.sql("""
+                SELECT channel, COALESCE(val_last_touch, 0) AS attributed_revenue
                 FROM heuristic_attribution
                 ORDER BY attributed_revenue DESC
             """).fetchall()
-            cols = ["channel", "attributed_revenue"]
 
-        # Get conversion counts from raw_clicks
-        conv_rows = con.sql("""
-            SELECT channel, SUM(conversion) AS conversions
-            FROM raw_clicks
-            WHERE conversion = 1
-            GROUP BY channel
-            ORDER BY channel
-        """).fetchall()
-        conv_map = {r[0]: int(r[1]) for r in conv_rows}
+        if not rev_rows:
+            con.close()
+            return FALLBACK_DATA
+
+        # ── Conversion counts from raw_clicks ─────────────────────────────
+        conv_map = {}
+        try:
+            for r in con.sql("""
+                SELECT channel, SUM(conversion) AS conversions
+                FROM raw_clicks
+                WHERE channel IS NOT NULL
+                GROUP BY channel
+            """).fetchall():
+                conv_map[r[0]] = int(r[1])
+        except Exception:
+            pass
+
+        # ── Historical spend per channel from channel_spend seed ──────────
+        spend_map = {}
+        try:
+            for r in con.sql(
+                "SELECT channel, COALESCE(spend, 0) AS spend FROM channel_spend"
+            ).fetchall():
+                spend_map[r[0]] = float(r[1])
+        except Exception:
+            pass
 
         con.close()
 
-        if not rows:
-            return FALLBACK_DATA
-
         return [
             {
-                "channel": r[0],
+                "channel":            r[0],
                 "attributed_revenue": float(r[1]) if r[1] else 0.0,
-                "conversions": conv_map.get(r[0], 0),
+                "conversions":        conv_map.get(r[0], 0),
+                "spend":              spend_map.get(r[0], 0.0),
             }
-            for r in rows
+            for r in rev_rows
             if r[0] is not None
         ]
 
