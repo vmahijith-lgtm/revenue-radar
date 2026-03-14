@@ -20,13 +20,13 @@ def main():
 
     # 2. Seed static reference data (channel_spend.csv → DuckDB)
     run_cmd(
-        f"dbt seed --profiles-dir {PROFILES_DIR}",
+        f'dbt seed --profiles-dir "{PROFILES_DIR}"',
         cwd=DBT_PROJECT_DIR,
     )
 
     # 3. Run dbt models (heuristics + markov + final + ROI)
     run_cmd(
-        f"dbt run --profiles-dir {PROFILES_DIR}",
+        f'dbt run --profiles-dir "{PROFILES_DIR}"',
         cwd=DBT_PROJECT_DIR,
     )
 
