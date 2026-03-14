@@ -419,7 +419,6 @@ with st.sidebar:
         st.caption("Upload your data and run attribution to see results.")
 
     st.markdown("<hr>", unsafe_allow_html=True)
-    st.caption("dbt only: `python run_pipeline.py`  \nSynthetic data: `python sample1.py`")
 
 
 # ─────────────────────────────────────────────────────────────

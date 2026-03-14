@@ -117,17 +117,6 @@ with input_col:
         format="%.2f",
     )
 
-    st.markdown("<hr>", unsafe_allow_html=True)
-    st.markdown("**How it works**")
-    st.markdown("""
-- Loads live channel performance from your attribution pipeline
-- Fits a **diminishing-returns revenue model** per channel  
-  `revenue = weight × log(1 + spend)`
-- Runs **20,000 Dirichlet random strategies**
-- Returns the allocation with the highest **net reward**  
-  `reward = expected revenue − ad spend`
-    """)
-
     run_btn = st.button("🚀 Optimize Budget", type="primary", use_container_width=True)
 
 with preview_col:
