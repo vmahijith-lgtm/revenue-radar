@@ -38,7 +38,8 @@ class ChannelAllocation(BaseModel):
 
 class BudgetResponse(BaseModel):
     total_budget:       float
-    expected_roi_index: float
+    expected_roi_index: float   # estimated ROI %
+    estimated_revenue:  float   # estimated revenue in dollars
     data_source:        str
     algorithm:          str
     episodes_run:       int
@@ -100,6 +101,7 @@ def optimize_budget(req: BudgetRequest):
     return BudgetResponse(
         total_budget=req.total_budget,
         expected_roi_index=result["expected_roi_index"],
+        estimated_revenue=result["estimated_revenue"],
         data_source=source,
         algorithm=result["algorithm"],
         episodes_run=result["episodes_run"],

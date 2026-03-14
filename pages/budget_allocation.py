@@ -179,10 +179,10 @@ if run_btn:
 
     # KPIs
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Total Budget",       f"${data['total_budget']:,.2f}")
-    k2.metric("Channels",           str(len(allocations)))
-    k3.metric("ROI Index",          str(data["expected_roi_index"]))
-    k4.metric("Data",               "Live" if "DuckDB" in data.get("data_source", "") else "Sample")
+    k1.metric("Total Budget",        f"${data['total_budget']:,.2f}")
+    k2.metric("Channels",            str(len(allocations)))
+    k3.metric("Estimated Revenue",   f"${data['estimated_revenue']:,.0f}")
+    k4.metric("Estimated ROI",       f"{data['expected_roi_index']:+.1f}%")
 
     st.caption(f"📦 Data source: **{data.get('data_source', '')}**")
     st.markdown("<hr>", unsafe_allow_html=True)

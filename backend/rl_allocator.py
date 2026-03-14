@@ -161,6 +161,24 @@ def optimize_budget_allocation(
         )
         history.append(net_reward)
 
+    # ── Compute meaningful ROI estimate ──────────────────────
+    # Scale the log-utility output to dollar revenue using total historical
+    # attributed revenue as the reference scale.
+    total_attributed_revenue = sum(d["attributed_revenue"] for d in attribution_data)
+
+    # Estimated revenue with the recommended spending (log diminishing returns, scaled)
+    # Normalise by log(1 + historical avg spend) to anchor to observed revenue
+    historical_avg_spend = total_budget / len(arms)   # proxy for typical spend per channel
+    rev_scale = total_attributed_revenue / max(
+        sum(arm.weight * np.log1p(historical_avg_spend) for arm in arms), 1e-9
+    )
+
+    estimated_revenue = sum(
+        arm.weight * np.log1p(s) * rev_scale
+        for arm, s in zip(arms, spend)
+    )
+    roi_pct = (estimated_revenue - total_budget) / total_budget * 100
+
     # Final allocation percentages
     total_spent = spend.sum()
     alloc_pcts  = (spend / total_spent).tolist() if total_spent > 0 else [1/len(arms)] * len(arms)
@@ -169,7 +187,8 @@ def optimize_budget_allocation(
         "channels":            [arm.channel for arm in arms],
         "allocation_pcts":     alloc_pcts,
         "recommended_budgets": spend.tolist(),
-        "expected_roi_index":  round(float(np.mean(history[-100:])), 4),
+        "expected_roi_index":  round(roi_pct, 1),        # estimated ROI %
+        "estimated_revenue":   round(estimated_revenue, 2),
         "episodes_run":        n_steps,
         "algorithm":           "Incremental Thompson Sampling (Beta-Bernoulli bandit)",
     }
