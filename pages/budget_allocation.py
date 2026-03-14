@@ -160,8 +160,11 @@ if run_btn:
             st.error("Cannot reach the API. Is `uvicorn backend.main:app --reload` running?")
             st.stop()
         except requests.exceptions.HTTPError as e:
-            detail = e.response.json().get("detail", str(e))
-            st.error(f"API error: {detail}")
+            try:
+                detail = e.response.json().get("detail", str(e))
+            except Exception:
+                detail = e.response.text or str(e)
+            st.error(f"API error ({e.response.status_code}): {detail}")
             st.stop()
         except Exception as e:
             st.error(f"Unexpected error: {e}")

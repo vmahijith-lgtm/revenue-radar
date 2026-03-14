@@ -101,5 +101,7 @@ def optimize_budget(req: BudgetRequest):
         total_budget=req.total_budget,
         expected_roi_index=result["expected_roi_index"],
         data_source=source,
+        algorithm=result["algorithm"],
+        episodes_run=result["episodes_run"],
         allocations=allocations,
     )
