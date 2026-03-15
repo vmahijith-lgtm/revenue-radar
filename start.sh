@@ -8,7 +8,7 @@
 
 set -e
 
-PORT=${1:-8501}
+PORT=${PORT:-8501}
 API_PORT=8000
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
