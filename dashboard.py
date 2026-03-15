@@ -439,7 +439,19 @@ with st.sidebar:
                             with st.expander("Error log"):
                                 st.code(log, language="bash")
     else:
-        st.caption("Upload your data and run attribution to see results.")
+        st.caption("""
+**Revenue Radar**
+
+Revenue Radar helps marketing teams understand which channels truly drive revenue and how to allocate budget more effectively.
+
+• **Multi-touch attribution models** analyze customer journeys across marketing channels and estimate each channel's revenue contribution.
+
+• An **AI-powered budget optimizer** uses a reinforcement learning algorithm (Thompson Sampling) to simulate thousands of budget allocation scenarios.
+
+• Based on these simulations, the system recommends the **optimal distribution of marketing spend** to maximize expected return on investment (ROI).
+
+In short, Revenue Radar transforms raw marketing data into **clear attribution insights and actionable budget decisions.**
+""")
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
@@ -448,7 +460,7 @@ with st.sidebar:
 # MAIN PAGE
 # ─────────────────────────────────────────────────────────────
 st.markdown('<p class="page-title">🛡️ Attribution Engine</p>', unsafe_allow_html=True)
-st.markdown('<p class="page-subtitle">Multi-touch marketing attribution · powered by dbt + DuckDB</p>', unsafe_allow_html=True)
+st.markdown('<p class="page-subtitle">Multi-touch attribution and AI-driven budget optimization to help you understand where revenue comes from and where to invest next.</p>', unsafe_allow_html=True)
 
 # ── Gate: show upload landing if no data uploaded yet ─────────
 if not st.session_state["results_ready"]:
