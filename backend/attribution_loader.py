@@ -37,31 +37,27 @@ def load_attribution_data() -> list[dict]:
     try:
         con = duckdb.connect(str(_DB_PATH), read_only=True)
 
-        # ── 1. Attributed revenue from final_attribution ──────────────
+        # ── 1. Attributed revenue — Markov Chain (primary) ────────────
+        # Markov removal-effect is the most causally sound model for
+        # budget allocation: it measures how much revenue is lost when
+        # each channel is removed, giving consistent cross-channel credit.
         try:
             rev_rows = con.sql("""
-                SELECT
-                    channel,
-                    GREATEST(
-                        COALESCE(val_first_touch, 0),
-                        COALESCE(val_last_touch,  0),
-                        COALESCE(val_u_shaped,    0),
-                        COALESCE(val_time_decay,  0),
-                        COALESCE(val_markov,      0)
-                    ) AS attributed_revenue
+                SELECT channel,
+                       COALESCE(val_markov, 0) AS attributed_revenue
                 FROM final_attribution
+                WHERE val_markov IS NOT NULL
                 ORDER BY attributed_revenue DESC
             """).fetchall()
         except Exception:
-            # Fallback: use heuristic_attribution if final not ready
+            rev_rows = []
+
+        # Fallback 1: last-touch from heuristic (if Markov not ready)
+        if not rev_rows:
             try:
                 rev_rows = con.sql("""
                     SELECT channel,
-                        GREATEST(
-                            COALESCE(val_last_touch, 0),
-                            COALESCE(val_u_shaped,   0),
-                            COALESCE(val_time_decay,  0)
-                        ) AS attributed_revenue
+                           COALESCE(val_last_touch, 0) AS attributed_revenue
                     FROM heuristic_attribution
                     ORDER BY attributed_revenue DESC
                 """).fetchall()
